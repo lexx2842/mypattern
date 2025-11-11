@@ -113,6 +113,24 @@ class HealthDatabase:
             )
         ''')
         
+        # Nutrition intake table (MyNetDiary CSV imports)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS nutrition_intake (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date DATE NOT NULL,
+                meal_type TEXT,
+                calories REAL,
+                protein_g REAL,
+                carbs_g REAL,
+                fat_g REAL,
+                fiber_g REAL,
+                sugar_g REAL,
+                sodium_mg REAL,
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         # Hypotheses table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS hypotheses (
@@ -279,6 +297,42 @@ class HealthDatabase:
                 'notes': 'Late eating' if late_eating else ''
             }
             
+            # Nutrition intake (aggregate macros, distribute across meals)
+            total_calories = 2100 + random.gauss(0, 250)
+            if pasta_today:
+                total_calories += 250
+            if late_eating:
+                total_calories += 150
+            total_protein = max(60, 100 + random.gauss(0, 15) - (late_eating * 5))
+            total_carbs = max(150, 230 + random.gauss(0, 30) + (pasta_today * 40))
+            total_fat = max(50, 70 + random.gauss(0, 10))
+            total_fiber = max(15, 25 + random.gauss(0, 5))
+            total_sugar = max(20, 35 + random.gauss(0, 8) + (nuts_today * 5))
+            total_sodium = max(1000, 1800 + random.gauss(0, 250))
+
+            meal_ratios = {
+                'breakfast': 0.25,
+                'lunch': 0.35,
+                'dinner': 0.3 + (0.1 if late_eating else 0),
+                'snack': 0.1 + (0.05 if nuts_today else 0)
+            }
+            ratio_sum = sum(meal_ratios.values())
+            for meal, ratio in meal_ratios.items():
+                share = ratio / ratio_sum
+                nutrition_row = {
+                    'date': date.strftime('%Y-%m-%d'),
+                    'meal_type': meal,
+                    'calories': round(total_calories * share, 1),
+                    'protein_g': round(total_protein * share, 1),
+                    'carbs_g': round(total_carbs * share, 1),
+                    'fat_g': round(total_fat * share, 1),
+                    'fiber_g': round(total_fiber * share, 1),
+                    'sugar_g': round(total_sugar * share, 1),
+                    'sodium_mg': round(total_sodium * share, 1),
+                    'notes': 'Late meal' if (meal == 'dinner' and late_eating) else ('Nuts snack' if (meal == 'snack' and nuts_today) else '')
+                }
+                self._insert_nutrition_row(conn, nutrition_row)
+
             # Environmental data
             env_data = {
                 'date': date.strftime('%Y-%m-%d'),
@@ -384,6 +438,25 @@ class HealthDatabase:
               data['pollen_hazelnut'], data['pollen_birch'], data['pollen_grass'], 
               data['air_quality_index'], data['weather_condition']))
     
+    def _insert_nutrition_row(self, conn, row: dict):
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO nutrition_intake
+            (date, meal_type, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, sodium_mg, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            row.get('date'),
+            row.get('meal_type'),
+            row.get('calories'),
+            row.get('protein_g'),
+            row.get('carbs_g'),
+            row.get('fat_g'),
+            row.get('fiber_g'),
+            row.get('sugar_g'),
+            row.get('sodium_mg'),
+            row.get('notes') or ''
+        ))
+    
     def _insert_workout_data(self, conn, data):
         cursor = conn.cursor()
         cursor.execute('''
@@ -447,6 +520,13 @@ class HealthDatabase:
             ORDER BY date
         ''', conn, params=[start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')])
         
+        # Nutrition data
+        nutrition_df = pd.read_sql_query('''
+            SELECT * FROM nutrition_intake
+            WHERE date BETWEEN ? AND ?
+            ORDER BY date
+        ''', conn, params=[start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')])
+        
         # Hypotheses
         hypotheses_df = pd.read_sql_query('''
             SELECT * FROM hypotheses 
@@ -460,7 +540,8 @@ class HealthDatabase:
             'subjective': subjective_df,
             'environmental': env_df,
             'food': food_df,
-            'hypotheses': hypotheses_df
+            'hypotheses': hypotheses_df,
+            'nutrition': nutrition_df,
         }
     
     def insert_manual_data(self, date: str, data_type: str, data: Dict[str, Any]):

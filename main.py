@@ -11,6 +11,7 @@ import requests
 import os
 import sqlite3
 import numpy as np
+import io
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
@@ -24,11 +25,12 @@ class MyPatternApp:
     def __init__(self):
         self.db = HealthDatabase()
         self.current_data = None
+        self.days_range = 14
         self.setup_ui()
     
     def setup_ui(self):
         """Setup the main UI with tabs"""
-        ui.page_title('MyPattern - Personal Health Detective')
+        ui.page_title("MyPattern - Alex's Personal Health Detective")
         
         # Custom CSS for brand color
         ui.add_head_html(f'''
@@ -48,7 +50,7 @@ class MyPatternApp:
         # Header
         with ui.header().classes('items-center justify-between py-3'):
             ui.label('MyPattern').classes('text-h4 font-bold logo-text')
-            ui.label('Personal Health Detective').classes('text-h6 text-white')
+            ui.label("Alex's Health Detective").classes('text-h4 text-white')
         
         # Main content with tabs
         with ui.tabs().classes('w-full') as tabs:
@@ -88,33 +90,41 @@ class MyPatternApp:
             with ui.row().classes('w-full mb-4 items-center'):
                 ui.label('Time Range:').classes('mr-2 text-base text-black')
                 with ui.row().classes('items-center gap-2'):
-                    days_select = ui.select([7, 14, 30, 90], value=14).classes('w-16 text-sm bg-grey-2 border-0 py-1')
+                    days_select = ui.select([7, 14, 30, 90], value=self.days_range).classes('w-16 text-sm bg-grey-2 border-0 py-1')
                     ui.label('days').classes('text-base text-black')
-                refresh_btn = ui.button('Refresh', icon='refresh', on_click=lambda: self.refresh_dashboard(days_select.value)).classes('text-sm px-3 py-1')
+                refresh_btn = ui.button('Refresh', icon='refresh', on_click=lambda: self.on_refresh(days_select.value)).classes('text-sm px-3 py-1')
             
             # Metrics cards
             with ui.row().classes('w-full mb-6'):
-                with ui.card().classes('p-4 m-2'):
-                    ui.label('Resting HR').classes('text-subtitle2')
+                with ui.card().classes('p-3 m-2'):
+                    ui.label('Resting HR').classes('text-subtitle2 q-pa-none q-ma-none')
                     self.hr_label = ui.label('--').classes('text-h5 font-bold brand-color')
                 
-                with ui.card().classes('p-4 m-2'):
-                    ui.label('HRV').classes('text-subtitle2')
+                with ui.card().classes('p-3 m-2'):
+                    ui.label('HRV').classes('text-subtitle2 q-pa-none q-ma-none')
                     self.hrv_label = ui.label('--').classes('text-h5 font-bold brand-color')
                 
-                with ui.card().classes('p-4 m-2'):
-                    ui.label('Sleep Quality').classes('text-subtitle2')
+                with ui.card().classes('p-3 m-2'):
+                    ui.label('Sleep Quality').classes('text-subtitle2 q-pa-none q-ma-none')
                     self.sleep_label = ui.label('--').classes('text-h5 font-bold brand-color')
                 
-                with ui.card().classes('p-4 m-2'):
-                    ui.label('Mood').classes('text-subtitle2')
+                with ui.card().classes('p-3 m-2'):
+                    ui.label('Mood').classes('text-subtitle2 q-pa-none q-ma-none')
                     self.mood_label = ui.label('--').classes('text-h5 font-bold brand-color')
+                
+                with ui.card().classes('p-3 m-2'):
+                    ui.label('Calories').classes('text-subtitle2 q-pa-none q-ma-none')
+                    self.calories_label = ui.label('--').classes('text-h5 font-bold brand-color')
+                
+                with ui.card().classes('p-3 m-2'):
+                    ui.label('Protein').classes('text-subtitle2 q-pa-none q-ma-none')
+                    self.protein_label = ui.label('--').classes('text-h5 font-bold brand-color')
             
             # Charts container that will be updated dynamically
             self.charts_container = ui.column().classes('w-full')
             
             # Load initial data
-            self.refresh_dashboard(14)
+            self.refresh_dashboard(self.days_range)
     
     def create_device_sync(self):
         """Create device sync interface"""
@@ -163,6 +173,53 @@ class MyPatternApp:
                 with ui.row().classes('w-full mt-4'):
                     weather_btn = ui.button('Sync Weather Data', icon='cloud', on_click=self.sync_weather_data).classes('brand-bg text-white')
                     self.weather_status = ui.label('').classes('ml-4')
+            
+            # MyNetDiary Nutrition section
+            with ui.card().classes('w-full p-4 mb-4'):
+                ui.label('MyNetDiary Nutrition').classes('text-h6 mb-2 text-black')
+                ui.label('Upload your CSV export to import calories and macros').classes('text-sm text-black mb-3 font-bold')
+                
+                def on_mnd_csv_upload(e):
+                    try:
+                        df = pd.read_csv(io.BytesIO(e.content))
+                        colmap = {
+                            'Date': 'date',
+                            'Meal': 'meal_type',
+                            'Calories': 'calories',
+                            'Protein (g)': 'protein_g',
+                            'Carbs (g)': 'carbs_g',
+                            'Fat (g)': 'fat_g',
+                            'Fiber (g)': 'fiber_g',
+                            'Sugar (g)': 'sugar_g',
+                            'Sodium (mg)': 'sodium_mg',
+                            'Notes': 'notes',
+                        }
+                        rename = {}
+                        for c in df.columns:
+                            if c in colmap:
+                                rename[c] = colmap[c]
+                        df = df.rename(columns=rename)
+                        if 'date' not in df.columns or 'calories' not in df.columns:
+                            ui.notify('CSV missing required columns: Date, Calories', type='warning')
+                            return
+                        df['date'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
+                        keep_cols = ['date','meal_type','calories','protein_g','carbs_g','fat_g','fiber_g','sugar_g','sodium_mg','notes']
+                        for k in keep_cols:
+                            if k not in df.columns:
+                                df[k] = None
+                        df = df[keep_cols]
+                        conn = self.db._get_connection()
+                        for _, row in df.iterrows():
+                            self.db._insert_nutrition_row(conn, row.to_dict())
+                        conn.commit()
+                        conn.close()
+                        ui.notify(f'Imported {len(df)} nutrition records', type='positive')
+                        self.refresh_dashboard(self.days_range)
+                        self.load_insights()
+                    except Exception as ex:
+                        ui.notify(f'Error importing CSV: {ex}', type='error')
+                
+                ui.upload(on_upload=on_mnd_csv_upload, auto_upload=True, label='Upload MyNetDiary CSV')
             
             # Manual Data Entry section
             with ui.card().classes('w-full p-4 mb-4'):
@@ -261,14 +318,14 @@ class MyPatternApp:
                     with ui.column().classes('flex-1 mr-2'):
                         ui.label('Variable 1:').classes('text-sm')
                         self.corr_var1 = ui.select(
-                            ['hrv', 'heart_rate', 'sleep_duration', 'mood', 'energy_level', 'pollen_hazelnut', 'pollen_birch', 'pollen_grass', 'temperature'],
+                            ['hrv', 'heart_rate', 'sleep_duration', 'mood', 'energy_level', 'pollen_hazelnut', 'pollen_birch', 'pollen_grass', 'temperature', 'calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sugar_g'],
                             value='hrv'
                         ).classes('w-full')
                     
                     with ui.column().classes('flex-1 mr-2'):
                         ui.label('Variable 2:').classes('text-sm')
                         self.corr_var2 = ui.select(
-                            ['hrv', 'heart_rate', 'sleep_duration', 'mood', 'energy_level', 'pollen_hazelnut', 'pollen_birch', 'pollen_grass', 'temperature'],
+                            ['hrv', 'heart_rate', 'sleep_duration', 'mood', 'energy_level', 'pollen_hazelnut', 'pollen_birch', 'pollen_grass', 'temperature', 'calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sugar_g'],
                             value='mood'
                         ).classes('w-full')
                     
@@ -303,7 +360,7 @@ class MyPatternApp:
                     with ui.column().classes('flex-1 mr-2'):
                         ui.label('Target Variable:').classes('text-sm mb-1')
                         self.nn_target = ui.select(
-                            options=['hrv', 'mood', 'energy_level', 'sleep_duration'],
+                            options=['hrv', 'mood', 'energy_level', 'sleep_duration', 'calories', 'protein_g'],
                             value='hrv'
                         ).classes('w-full')
                         ui.label('The metric to predict/analyze').classes('text-xs text-grey-6')
@@ -408,7 +465,8 @@ class MyPatternApp:
                         self.hyp_trigger = ui.select([
                             'Pasta consumption', 'Late eating', 'Nuts consumption', 'Alcohol intake',
                             'High stress day', 'Poor sleep', 'High pollen count', 'Cold weather',
-                            'Intense workout', 'Travel', 'Work deadline', 'Social event'
+                            'Intense workout', 'Travel', 'Work deadline', 'Social event',
+                            'High calorie dinner', 'High carbs day', 'Low protein day'
                         ], value='Pasta consumption').classes('w-full')
                     
                     with ui.column().classes('flex-1 ml-2'):
@@ -460,6 +518,18 @@ class MyPatternApp:
                 self.mood_label.set_text(f"{latest_subjective['mood']}/10")
                 print(f"Updated Sleep: {latest_subjective['sleep_quality']}, Mood: {latest_subjective['mood']}")
             
+            # Update nutrition metrics
+            if 'nutrition' in data and not data['nutrition'].empty:
+                latest_nut = data['nutrition'].sort_values('date').iloc[-1]
+                if hasattr(self, 'calories_label'):
+                    try:
+                        self.calories_label.set_text(f"{int(latest_nut.get('calories', 0))} kcal")
+                    except Exception:
+                        self.calories_label.set_text("--")
+                if hasattr(self, 'protein_label'):
+                    pg = latest_nut.get('protein_g')
+                    self.protein_label.set_text(f"{pg:.0f} g" if pd.notna(pg) else "--")
+            
             # Clear and recreate charts
             self.charts_container.clear()
             
@@ -492,6 +562,11 @@ class MyPatternApp:
                 
                 with ui.row().classes('w-full mt-4'):
                     with ui.column().classes('w-full'):
+                        nut_fig = self.create_nutrition_chart(data, days)
+                        ui.plotly(figure=nut_fig).classes('w-full h-112')
+                
+                with ui.row().classes('w-full mt-4'):
+                    with ui.column().classes('w-full'):
                         ui.label('Recent Insights').classes('text-h6 mb-3 mt-2')
                         insights_card = ui.card().classes('p-4')
                         with insights_card:
@@ -506,6 +581,34 @@ class MyPatternApp:
         except Exception as e:
             print(f"Error in refresh_dashboard: {str(e)}")
             ui.notify(f"Error refreshing dashboard: {str(e)}", type='error')
+    
+    def create_nutrition_chart(self, data: Dict[str, Any], days: int = 14) -> go.Figure:
+        """Create nutrition (calories & protein) chart"""
+        fig = go.Figure()
+        if 'nutrition' in data and not data['nutrition'].empty:
+            df = data['nutrition'].copy()
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.sort_values('date')
+            agg = df.groupby(df['date'].dt.strftime('%Y-%m-%d')).agg({
+                'calories':'sum','protein_g':'sum','carbs_g':'sum','fat_g':'sum'
+            }).reset_index()
+            agg_tail = agg.tail(days).reset_index(drop=True)
+            x = list(range(len(agg_tail)))
+            fig.add_trace(go.Bar(x=x, y=agg_tail['calories'], name='Calories (kcal)', marker_color='#e67e22'))
+            fig.add_trace(go.Scatter(x=x, y=agg_tail['protein_g'], name='Protein (g)', yaxis='y2', line=dict(color='#2ecc71')))
+            fig.update_layout(
+                height=500,
+                showlegend=True,
+                legend=dict(orientation='h', yanchor='bottom', y=-0.2, xanchor='center', x=0.5),
+                title=dict(text='Daily Calories & Protein', font=dict(size=24, color='#1f2937', family='Arial, sans-serif', weight='bold')),
+                margin=dict(l=50, r=50, t=60, b=50),
+                yaxis2=dict(title='Protein (g)', overlaying='y', side='right')
+            )
+            fig.update_xaxes(title_text='Days', title_standoff=10)
+            fig.update_yaxes(title_text='Calories (kcal)')
+        else:
+            fig.update_layout(height=300, title='Nutrition (no data)')
+        return fig
     
     def create_hr_chart(self, data: Dict[str, Any], days: int = 14) -> go.Figure:
         """Create heart rate and HRV chart"""
@@ -1274,7 +1377,7 @@ class MyPatternApp:
                 'weed_pollen': 'Low'
             }
             self.update_pollen_display(sample_risk)
-            ui.notify(f"Weather data synced for Zurich: {environmental_data['temperature']}°C (using sample pollen data)", type='positive')
+            ui.notify(f"Weather data synced for Zurich: {environmental_data['temperature']}°C", type='positive')
             self.weather_status.set_text("Sync completed")
             
         except Exception as e:
@@ -1319,20 +1422,23 @@ class MyPatternApp:
     def load_insights(self):
         """Load insights and analysis"""
         try:
-            data = self.db.get_dashboard_data(90)
+            data = self.db.get_dashboard_data(self.days_range)
             
             # Update baseline
             self.baseline_content.clear()
             with self.baseline_content:
                 if not data['garmin'].empty:
                     garmin_df = data['garmin']
-                    avg_hr = garmin_df['resting_hr'].mean()
-                    avg_hrv = garmin_df['hrv'].mean()
-                    avg_sleep = garmin_df['sleep_duration'].mean()
+                    latest_garmin = garmin_df.iloc[-1]
+                    latest_hr = latest_garmin['resting_hr']
+                    latest_hrv = latest_garmin['hrv'] if 'hrv' in garmin_df.columns else None
+                    latest_sleep = latest_garmin['sleep_duration'] if 'sleep_duration' in garmin_df.columns else None
                     
-                    ui.label(f"Average Resting HR: {avg_hr:.1f} bpm").classes('mb-1')
-                    ui.label(f"Average Heart Rate Variability: {avg_hrv:.1f} ms").classes('mb-1')
-                    ui.label(f"Average Sleep: {avg_sleep:.1f} hours").classes('mb-1')
+                    ui.label(f"Latest Resting HR: {latest_hr:.0f} bpm").classes('mb-1')
+                    if latest_hrv is not None:
+                        ui.label(f"Latest Heart Rate Variability: {latest_hrv:.1f} ms").classes('mb-1')
+                    if latest_sleep is not None:
+                        ui.label(f"Latest Sleep: {latest_sleep:.1f} hours").classes('mb-1')
                 else:
                     ui.label('Insufficient data for baseline calculation').classes('text-grey-6')
             
@@ -1344,6 +1450,16 @@ class MyPatternApp:
             
         except Exception as e:
             ui.notify(f"Error loading insights: {str(e)}", type='error')
+    
+    def on_refresh(self, selected_days: int):
+        """Handle refresh action to sync days range across views"""
+        try:
+            self.days_range = int(selected_days)
+        except Exception:
+            self.days_range = 14
+        # Refresh both dashboard and insights with the same range
+        self.refresh_dashboard(self.days_range)
+        self.load_insights()
     
     def create_correlation_chart(self, data: Dict[str, Any]) -> go.Figure:
         """Create correlation analysis chart"""
@@ -1422,6 +1538,7 @@ class MyPatternApp:
             garmin_vars = ['hrv', 'heart_rate', 'sleep_duration']
             subjective_vars = ['mood', 'energy_level']
             env_vars = ['pollen_hazelnut', 'pollen_birch', 'pollen_grass', 'temperature']
+            nutrition_vars = ['calories', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'sugar_g']
             
             if var1 in garmin_vars:
                 df1 = data['garmin'].copy()
@@ -1429,6 +1546,8 @@ class MyPatternApp:
                 df1 = data['subjective'].copy()
             elif var1 in env_vars:
                 df1 = data['environmental'].copy()
+            elif var1 in nutrition_vars:
+                df1 = data['nutrition'].copy()
             
             if var2 in garmin_vars:
                 df2 = data['garmin'].copy()
@@ -1436,6 +1555,8 @@ class MyPatternApp:
                 df2 = data['subjective'].copy()
             elif var2 in env_vars:
                 df2 = data['environmental'].copy()
+            elif var2 in nutrition_vars:
+                df2 = data['nutrition'].copy()
             
             if df1 is None or df2 is None or df1.empty or df2.empty:
                 return None
@@ -2018,6 +2139,18 @@ class MyPatternApp:
                     merged_df = env_df[env_cols]
                 print(f"Debug - Environmental columns selected: {env_cols}")
             
+            # Merge nutrition (aggregate per date)
+            if 'nutrition' in data and not data['nutrition'].empty:
+                nut_df = data['nutrition'].copy()
+                nut_df['date'] = pd.to_datetime(nut_df['date'])
+                nut_agg = nut_df.groupby(nut_df['date'].dt.strftime('%Y-%m-%d'))[['calories','protein_g','carbs_g','fat_g','fiber_g','sugar_g']].sum().reset_index()
+                nut_agg['date'] = pd.to_datetime(nut_agg['date'])
+                if merged_df is not None:
+                    merged_df = pd.merge(merged_df, nut_agg, on='date', how='outer')
+                else:
+                    merged_df = nut_agg
+                print("Debug - Nutrition columns merged: ['calories','protein_g','carbs_g','fat_g','fiber_g','sugar_g']")
+            
             if merged_df is None:
                 print("Debug - No data sources available")
                 return None
@@ -2171,13 +2304,13 @@ class MyPatternApp:
                     ui.label(f'{i}. {feature} ({importance:.3f})').classes('text-sm ml-4')
                 
                 # Recommendation
-                ui.label('Recommendation:').classes('font-bold mt-3 mb-1')
+                ui.label('Recommendation:').classes('font-bold mt-3 mb-1 text-2xl')
                 if test_score > 0.5:
-                    ui.label(f'The model has learned meaningful patterns. Focus on optimizing the top features to improve {target}.').classes('text-sm text-grey-7')
+                    ui.label(f'The model has learned meaningful patterns. Focus on optimizing the top features to improve {target}.').classes('text-xl text-grey-7')
                 else:
-                    ui.label(f'The model shows weak predictive power. Consider collecting more data or trying different features.').classes('text-sm text-grey-7')
+                    ui.label(f'The model shows weak predictive power. Consider collecting more data or trying different features.').classes('text-xl text-grey-7')
 
 # Create and run the app
 if __name__ in {"__main__", "__mp_main__"}:
     app = MyPatternApp()
-    ui.run(port=8080, title="MyPattern - Personal Health Detective")
+    ui.run(host='127.0.0.1', port=8080, title="MyPattern - Alex's Personal Health Detective")
