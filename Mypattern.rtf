@@ -1,0 +1,37 @@
+MyPattern
+Produktkern in 1 Satz
+MyPattern = persönlicher Gesundheits-Detektiv: sammelt Streams (Wearables, Ernährung, Stimmung, Umgebung), baut deine individuelle Basislinie, entdeckt Abweichungen & Hypothesen (z.B. “Gluten + wenig Schlaf → Kopfschmerz ~18h später”), testet diese mit Mini-Experimenten (N=1 A/B) und gibt klare, umsetzbare Empfehlungen.
+Tech Stack
+-              Python 3.11
+-              **NiceGUI** (UI)
+-              SQLite Datenbank
+-              Garminconnect python library
+-              Brand‑Farbe: **`#2ECC71`**
+-              weitere, was passt
+ 
+Warum MyPattern? (Value Proposition)
+	•	Gesund länger leben (Longevity-Hebel): Früher erkennen, was dich systematisch stresst (z. B. Schlafmangel + späte Carbs + Alkohol) und gezielt gegensteuern. Kleine, messbare Gewohnheitsänderungen addieren sich über Jahre.
+	•	Radikal individuell: Gesundheit ist hochpersönlich. Allgemeine Tipps greifen oft nicht. MyPattern findet deine Zusammenhänge (z. B. „Kaffee nach 14 Uhr → schlechter Schlaf → Kopfschmerz 24 h später“).
+	•	Von Korrelation → Wirkung: Nicht nur Charts. Hypothesen + Mini-Experimente (AB/AB) zeigen, ob eine Änderung bei dir wirklich einen Effekt hat.
+	•	Frühe Warnzeichen statt Spätfolgen: Muster in HRV, Schlaf, Stimmung & Symptomen früh erkennen – bevor es chronisch wird.
+	•	Ohne Overhead: Automatischer Import (Wearables), leichte manuelle Eingaben, klare Empfehlungen – kein Bullet-Journal nötig.
+	•	Privacy-first: On-Device-KI (wo möglich), feingranulare Opt-ins, Daten gehören dir.
+Beispiel-Use-Cases (Kontext, für Später)
+	•	„Warum bin ich 2–3×/Monat migränisch?“ → Muster: Schlaf <6h + Rotwein + hoher Pollencount → 24–36h später Migräne-Risiko ↑; Vorschlag: „Teste 4 Wochen Rotwein→Weisswein-Swap + 23:00-Curfew.“
+	•	„Nach Pasta werde ich schlapp.“ → Muster: High-GI abends + spätes Essen → HRV↓ am nächsten Morgen; Hypothese „späte KH“; Intervention: Pasta→Linsennudeln + früher essen, Wirkung messen.
+	•	„Juckreiz random?“ → Muster: Nüsse + Hausstaub (Smart-Sensor) + trockene Luft → Hautsymptome; Vorschlag: Luftbefeuchtung + Nüsse 2 Wochen pausieren, Re-Challenge.
+	•	„Werden meine Panikpeaks vorhersehbar?“ → Muster in HR/EDA/Stimme + Kalenderevents; Intervention: 5-min Atem-Prompt vor Meetings mit hoher Vorhersagewahrscheinlichkeit.
+Datenquellen 
+	•	Garmin: HR (Ruhepuls), HRV, SpO₂, Schlaf, Temp, Schlafstufen, Aktivität (Garmin). 
+	•	Subjektiv: Stimmung (1–10 + Emotionsrad), Schmerz/Allergiesymptome (Skalen), Energielevel, Essen (simple, mit Tags wie Pasta, Nüsse, etc).
+	•	Umwelt: Pollen (Standort), Wetter. Standard-Standort Zürich, kann jedoch geändert werden. Wenn möglich kostenlose Quelle ohne API
+ 
+GUI Tabs
+-              Home / Dashboard: Mit Dashboards zu allen Metriken
+- 			   Manuelle Eingabe Subjetive werte, Datum kann gewält werden (zeigt dann ggf. die gespeicherten werte an). Standard heute.
+-              Device Sync: Möglichkeit, mit Garmin Connect zu syncen (user id/PW Maske, datum range wählbar). Fehlerhandling einbauen (war der login ergolfreich?).Möglichkeit, Wetter/Pollendaten zu synchronisieren. 
+-              Inisghts: Personal-Baseline + Anomalyse (Change-Points), CCF-Screening (Top-5 lagged Pairs). 
+-              Hypothesen-Karten
+ 
+Datenbank mit Beispieldaten befüllen. für die letzten 12 Monate. So, dass eine korrelation Pollen (Haselnuss) und energielevel sowie schlechter HRV mit Lag. Oder wenn Nüsse, dann allergiesymptome. Mein Durchschnitts-Ruhepuls ist so um die 45. Nichtzu starke stimmungsscwankugen 
+ 

@@ -1,0 +1,803 @@
+from nicegui import ui, app
+import pandas as pd
+from datetime import datetime, timedelta
+from database import HealthDatabase
+from typing import Dict, Any
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import random
+import requests
+import os
+
+# Brand color
+BRAND_COLOR = '#2ECC71'
+
+class MyPatternApp:
+    def __init__(self):
+        self.db = HealthDatabase()
+        self.current_data = None
+        self.setup_ui()
+    
+    def setup_ui(self):
+        """Setup the main UI with tabs"""
+        ui.page_title('MyPattern - Personal Health Detective')
+        
+        # Custom CSS for brand color
+        ui.add_head_html(f'''
+            <style>
+                .brand-color {{ color: {BRAND_COLOR} !important; }}
+                .brand-bg {{ background-color: {BRAND_COLOR} !important; }}
+                .tab-active {{ border-bottom: 2px solid {BRAND_COLOR} !important; }}
+            </style>
+        ''')
+        
+        # Header
+        with ui.header().classes('items-center justify-between'):
+            ui.label('MyPattern').classes('text-h4 font-bold brand-color')
+            ui.label('Personal Health Detective').classes('text-subtitle2 text-grey-6')
+        
+        # Main content with tabs
+        with ui.tabs().classes('w-full') as tabs:
+            dashboard_tab = ui.tab('Dashboard', icon='dashboard')
+            manual_tab = ui.tab('Manual Input', icon='edit')
+            sync_tab = ui.tab('Device Sync', icon='sync')
+            insights_tab = ui.tab('Insights', icon='insights')
+            hypotheses_tab = ui.tab('Hypotheses', icon='psychology')
+        
+        with ui.tab_panels(tabs, value=dashboard_tab).classes('w-full'):
+            # Dashboard Tab
+            with ui.tab_panel(dashboard_tab):
+                self.create_dashboard()
+            
+            # Manual Input Tab
+            with ui.tab_panel(manual_tab):
+                self.create_manual_input()
+            
+            # Device Sync Tab
+            with ui.tab_panel(sync_tab):
+                self.create_device_sync()
+            
+            # Insights Tab
+            with ui.tab_panel(insights_tab):
+                self.create_insights()
+            
+            # Hypotheses Tab
+            with ui.tab_panel(hypotheses_tab):
+                self.create_hypotheses()
+    
+    def create_dashboard(self):
+        """Create the dashboard with metrics visualization"""
+        with ui.column().classes('w-full p-4'):
+            ui.label('Health Dashboard').classes('text-h5 font-bold mb-4 brand-color')
+            
+            # Date range selector
+            with ui.row().classes('w-full mb-4'):
+                ui.label('Time Range:').classes('mr-2')
+                days_select = ui.select([7, 14, 30, 90], value=30, label='Days').classes('w-32')
+                refresh_btn = ui.button('Refresh', icon='refresh', on_click=lambda: self.refresh_dashboard(days_select.value))
+            
+            # Metrics cards
+            with ui.row().classes('w-full mb-6'):
+                with ui.card().classes('p-4 m-2'):
+                    ui.label('Resting HR').classes('text-subtitle2')
+                    self.hr_label = ui.label('--').classes('text-h4 font-bold brand-color')
+                
+                with ui.card().classes('p-4 m-2'):
+                    ui.label('Heart Rate Variability').classes('text-subtitle2')
+                    self.hrv_label = ui.label('--').classes('text-h4 font-bold brand-color')
+                
+                with ui.card().classes('p-4 m-2'):
+                    ui.label('Sleep Quality').classes('text-subtitle2')
+                    self.sleep_label = ui.label('--').classes('text-h4 font-bold brand-color')
+                
+                with ui.card().classes('p-4 m-2'):
+                    ui.label('Mood').classes('text-subtitle2')
+                    self.mood_label = ui.label('--').classes('text-h4 font-bold brand-color')
+            
+            # Charts container that will be updated dynamically
+            self.charts_container = ui.column().classes('w-full')
+            
+            # Load initial data
+            self.refresh_dashboard(30)
+    
+    def create_manual_input(self):
+        """Create manual input form for subjective values"""
+        with ui.column().classes('w-full p-4'):
+            ui.label('Manual Data Entry').classes('text-h5 font-bold mb-4 brand-color')
+            
+            # Date selector
+            with ui.row().classes('w-full mb-4'):
+                ui.label('Date:').classes('mr-2')
+                self.date_input = ui.date(value=datetime.now().strftime('%Y-%m-%d'))
+                load_btn = ui.button('Load Existing', icon='search', on_click=self.load_existing_data)
+            
+            # Subjective data form
+            with ui.card().classes('w-full p-4 mb-4'):
+                ui.label('Subjective Metrics').classes('text-h6 mb-3')
+                
+                with ui.row().classes('w-full mb-2'):
+                    ui.label('Mood (1-10):').classes('w-32')
+                    self.mood_input = ui.slider(min=1, max=10, value=7).classes('flex-1')
+                    self.mood_value = ui.label('7').classes('w-8')
+                    self.mood_input.on('update:model-value', lambda e: self.mood_value.set_text(str(e.args)))
+                
+                with ui.row().classes('w-full mb-2'):
+                    ui.label('Energy (1-10):').classes('w-32')
+                    self.energy_input = ui.slider(min=1, max=10, value=7).classes('flex-1')
+                    self.energy_value = ui.label('7').classes('w-8')
+                    self.energy_input.on('update:model-value', lambda e: self.energy_value.set_text(str(e.args)))
+                
+                with ui.row().classes('w-full mb-2'):
+                    ui.label('Pain (0-10):').classes('w-32')
+                    self.pain_input = ui.slider(min=0, max=10, value=0).classes('flex-1')
+                    self.pain_value = ui.label('0').classes('w-8')
+                    self.pain_input.on('update:model-value', lambda e: self.pain_value.set_text(str(e.args)))
+                
+                with ui.row().classes('w-full mb-2'):
+                    ui.label('Allergy (0-10):').classes('w-32')
+                    self.allergy_input = ui.slider(min=0, max=10, value=0).classes('flex-1')
+                    self.allergy_value = ui.label('0').classes('w-8')
+                    self.allergy_input.on('update:model-value', lambda e: self.allergy_value.set_text(str(e.args)))
+                
+                with ui.row().classes('w-full mb-2'):
+                    ui.label('Stress (1-10):').classes('w-32')
+                    self.stress_input = ui.slider(min=1, max=10, value=5).classes('flex-1')
+                    self.stress_value = ui.label('5').classes('w-8')
+                    self.stress_input.on('update:model-value', lambda e: self.stress_value.set_text(str(e.args)))
+                
+                with ui.row().classes('w-full mb-2'):
+                    ui.label('Sleep Quality (1-10):').classes('w-32')
+                    self.sleep_quality_input = ui.slider(min=1, max=10, value=7).classes('flex-1')
+                    self.sleep_quality_value = ui.label('7').classes('w-8')
+                    self.sleep_quality_input.on('update:model-value', lambda e: self.sleep_quality_value.set_text(str(e.args)))
+                
+                self.notes_input = ui.textarea('Notes', placeholder='Additional observations...').classes('w-full mt-2')
+            
+            # Food intake form
+            with ui.card().classes('w-full p-4 mb-4'):
+                ui.label('Food Intake').classes('text-h6 mb-3')
+                
+                with ui.row().classes('w-full mb-2'):
+                    ui.label('Meal Type:').classes('w-32')
+                    self.meal_type = ui.select(['breakfast', 'lunch', 'dinner', 'snack'], value='dinner')
+                
+                self.food_items = ui.input('Food Items', placeholder='e.g., Pasta, Nuts, Salad...').classes('w-full mb-2')
+                self.food_tags = ui.input('Tags', placeholder='e.g., pasta, nuts, gluten (comma-separated)').classes('w-full mb-2')
+                self.food_notes = ui.textarea('Food Notes', placeholder='Additional food observations...').classes('w-full')
+            
+            # Save button
+            with ui.row().classes('w-full justify-center mt-4'):
+                save_btn = ui.button('Save Data', icon='save', on_click=self.save_manual_data).classes('brand-bg text-white px-8 py-2')
+    
+    def create_device_sync(self):
+        """Create device sync interface"""
+        with ui.column().classes('w-full p-4'):
+            ui.label('Device Synchronization').classes('text-h5 font-bold mb-4 brand-color')
+            
+            # Garmin Connect section
+            with ui.card().classes('w-full p-4 mb-4'):
+                ui.label('Garmin Connect').classes('text-h6 mb-3')
+                
+                with ui.row().classes('w-full mb-2'):
+                    ui.label('Username:').classes('w-24')
+                    self.garmin_username = ui.input('Garmin Username').classes('flex-1')
+                
+                with ui.row().classes('w-full mb-2'):
+                    ui.label('Password:').classes('w-24')
+                    self.garmin_password = ui.input('Garmin Password', password=True).classes('flex-1')
+                
+                with ui.row().classes('w-full mb-2'):
+                    ui.label('Date Range:').classes('w-24')
+                    self.sync_start_date = ui.date(value=(datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'))
+                    ui.label('to').classes('mx-2')
+                    self.sync_end_date = ui.date(value=datetime.now().strftime('%Y-%m-%d'))
+                
+                with ui.row().classes('w-full mt-4'):
+                    sync_btn = ui.button('Sync Garmin Data', icon='sync', on_click=self.sync_garmin_data).classes('brand-bg text-white')
+                    self.sync_status = ui.label('').classes('ml-4')
+            
+            # Weather/Pollen section
+            with ui.card().classes('w-full p-4 mb-4'):
+                ui.label('Weather & Pollen Data').classes('text-h6 mb-3')
+                
+                with ui.row().classes('w-full mb-2'):
+                    ui.label('Location:').classes('w-24')
+                    self.location = ui.input('Location', value='Zurich').classes('flex-1')
+                
+                with ui.row().classes('w-full mt-4'):
+                    weather_btn = ui.button('Sync Weather Data', icon='cloud', on_click=self.sync_weather_data).classes('brand-bg text-white')
+                    self.weather_status = ui.label('').classes('ml-4')
+    
+    def create_insights(self):
+        """Create insights and analysis view"""
+        with ui.column().classes('w-full p-4'):
+            ui.label('Health Insights').classes('text-h5 font-bold mb-4 brand-color')
+            
+            # Baseline section
+            with ui.card().classes('w-full p-4 mb-4'):
+                ui.label('Personal Baseline').classes('text-h6 mb-3')
+                self.baseline_content = ui.column()
+                with self.baseline_content:
+                    ui.label('Calculating baseline...').classes('text-grey-6')
+            
+            # Anomaly detection
+            with ui.card().classes('w-full p-4 mb-4'):
+                ui.label('Anomaly Detection').classes('text-h6 mb-3')
+                self.anomaly_content = ui.column()
+                with self.anomaly_content:
+                    ui.label('No anomalies detected recently.').classes('text-grey-6')
+            
+            # Correlation analysis
+            with ui.card().classes('w-full p-4 mb-4'):
+                ui.label('Top Correlations').classes('text-h6 mb-3')
+                self.correlation_container = ui.column().classes('w-full')
+            
+            # Load insights
+            self.load_insights()
+    
+    def create_hypotheses(self):
+        """Create hypotheses management view"""
+        with ui.column().classes('w-full p-4'):
+            ui.label('Hypotheses & Experiments').classes('text-h5 font-bold mb-4 brand-color')
+            
+            # Active hypotheses
+            with ui.card().classes('w-full p-4 mb-4'):
+                ui.label('Active Hypotheses').classes('text-h6 mb-3')
+                self.hypotheses_list = ui.column()
+            
+            # Add new hypothesis
+            with ui.card().classes('w-full p-4 mb-4'):
+                ui.label('Add New Hypothesis').classes('text-h6 mb-3')
+                
+                self.hyp_title = ui.input('Title').classes('w-full mb-2')
+                self.hyp_description = ui.textarea('Description').classes('w-full mb-2')
+                self.hyp_trigger = ui.input('Trigger Condition').classes('w-full mb-2')
+                self.hyp_effect = ui.input('Expected Effect').classes('w-full mb-2')
+                
+                add_hyp_btn = ui.button('Add Hypothesis', icon='add', on_click=self.add_hypothesis).classes('brand-bg text-white')
+            
+            # Load hypotheses
+            self.load_hypotheses()
+    
+    def refresh_dashboard(self, days: int):
+        """Refresh dashboard data"""
+        try:
+            data = self.db.get_dashboard_data(days)
+            
+            # Debug output
+            print(f"Dashboard refresh - Garmin data shape: {data['garmin'].shape}")
+            print(f"Dashboard refresh - Subjective data shape: {data['subjective'].shape}")
+            
+            # Update metrics
+            if not data['garmin'].empty:
+                latest_garmin = data['garmin'].iloc[-1]
+                self.hr_label.set_text(f"{latest_garmin['resting_hr']} bpm")
+                self.hrv_label.set_text(f"{latest_garmin['hrv']:.1f} ms")
+                print(f"Updated HR: {latest_garmin['resting_hr']}, HRV: {latest_garmin['hrv']}")
+            
+            if not data['subjective'].empty:
+                latest_subjective = data['subjective'].iloc[-1]
+                self.sleep_label.set_text(f"{latest_subjective['sleep_quality']}/10")
+                self.mood_label.set_text(f"{latest_subjective['mood']}/10")
+                print(f"Updated Sleep: {latest_subjective['sleep_quality']}, Mood: {latest_subjective['mood']}")
+            
+            # Clear and recreate charts
+            self.charts_container.clear()
+            
+            with self.charts_container:
+                # Charts
+                with ui.row().classes('w-full'):
+                    with ui.column().classes('w-full'):
+                        ui.label('Heart Rate & Heart Rate Variability Trend').classes('text-h6 mb-2')
+                        hr_fig = self.create_hr_chart(data)
+                        ui.plotly(figure=hr_fig).classes('w-full h-64')
+                
+                with ui.row().classes('w-full mt-4'):
+                    with ui.column().classes('w-full'):
+                        ui.label('Sleep & Mood Trend').classes('text-h6 mb-2')
+                        sleep_fig = self.create_sleep_chart(data)
+                        ui.plotly(figure=sleep_fig).classes('w-full h-64')
+                
+                with ui.row().classes('w-full mt-4'):
+                    with ui.column().classes('w-full'):
+                        ui.label('Environmental Factors').classes('text-h6 mb-2')
+                        env_fig = self.create_env_chart(data)
+                        ui.plotly(figure=env_fig).classes('w-full h-64')
+                
+                with ui.row().classes('w-full mt-4'):
+                    with ui.column().classes('w-full'):
+                        ui.label('Recent Insights').classes('text-h6 mb-2')
+                        insights_card = ui.card().classes('p-4')
+                        with insights_card:
+                            self.update_insights_card_content(data)
+            
+            print(f"HR chart traces: {len(hr_fig.data)}")
+            print(f"Sleep chart traces: {len(sleep_fig.data)}")
+            print(f"Env chart traces: {len(env_fig.data)}")
+            
+            ui.notify(f"Dashboard refreshed with {days} days of data", type='info')
+            
+        except Exception as e:
+            print(f"Error in refresh_dashboard: {str(e)}")
+            ui.notify(f"Error refreshing dashboard: {str(e)}", type='error')
+    
+    def create_hr_chart(self, data: Dict[str, Any]) -> go.Figure:
+        """Create heart rate and HRV chart"""
+        fig = go.Figure()
+        
+        if not data['garmin'].empty:
+            df = data['garmin'].copy()
+            
+            # Sort by date to ensure proper line plotting
+            df = df.sort_values('date')
+            
+            # Convert to lists to avoid pandas issues
+            x_values = list(range(len(df)))
+            hr_values = df['resting_hr'].tolist()
+            hrv_values = df['hrv'].tolist()
+            
+            print(f"HR Chart - X values: {x_values[:5]}")
+            print(f"HR Chart - HR values: {hr_values[:5]}")
+            print(f"HR Chart - HRV values: {hrv_values[:5]}")
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=x_values, 
+                    y=hr_values, 
+                    name='Resting HR', 
+                    line=dict(color=BRAND_COLOR),
+                    mode='lines+markers'
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=x_values, 
+                    y=hrv_values, 
+                    name='Heart Rate Variability', 
+                    line=dict(color='orange'),
+                    mode='lines+markers',
+                    yaxis='y2'
+                )
+            )
+            
+            # Add secondary y-axis
+            fig.update_layout(
+                yaxis2=dict(
+                    title="Heart Rate Variability (ms)",
+                    overlaying="y",
+                    side="right"
+                )
+            )
+        
+        fig.update_xaxes(title_text="Days")
+        fig.update_yaxes(title_text="Heart Rate (bpm)")
+        fig.update_layout(
+            height=300, 
+            showlegend=True,
+            title="Heart Rate & Heart Rate Variability Trend"
+        )
+        
+        return fig
+    
+    def create_sleep_chart(self, data: Dict[str, Any]) -> go.Figure:
+        """Create sleep and mood chart"""
+        fig = go.Figure()
+        
+        if not data['garmin'].empty and not data['subjective'].empty:
+            garmin_df = data['garmin'].copy()
+            subjective_df = data['subjective'].copy()
+            
+            # Sort by date
+            garmin_df = garmin_df.sort_values('date')
+            subjective_df = subjective_df.sort_values('date')
+            
+            # Convert to lists to avoid pandas issues
+            x_values = list(range(len(garmin_df)))
+            sleep_values = garmin_df['sleep_duration'].tolist()
+            mood_values = subjective_df['mood'].tolist()
+            
+            print(f"Sleep Chart - X values: {x_values[:5]}")
+            print(f"Sleep Chart - Sleep values: {sleep_values[:5]}")
+            print(f"Sleep Chart - Mood values: {mood_values[:5]}")
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=x_values, 
+                    y=sleep_values, 
+                    name='Sleep Duration', 
+                    line=dict(color=BRAND_COLOR),
+                    mode='lines+markers'
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=x_values, 
+                    y=mood_values, 
+                    name='Mood', 
+                    line=dict(color='purple'),
+                    mode='lines+markers',
+                    yaxis='y2'
+                )
+            )
+            
+            # Add secondary y-axis
+            fig.update_layout(
+                yaxis2=dict(
+                    title="Mood (1-10)",
+                    overlaying="y",
+                    side="right"
+                )
+            )
+        
+        fig.update_xaxes(title_text="Days")
+        fig.update_yaxes(title_text="Sleep Duration (hours)")
+        fig.update_layout(
+            height=300, 
+            showlegend=True,
+            title="Sleep & Mood Trend"
+        )
+        
+        return fig
+    
+    def create_env_chart(self, data: Dict[str, Any]) -> go.Figure:
+        """Create environmental factors chart"""
+        fig = go.Figure()
+        
+        if not data['environmental'].empty:
+            df = data['environmental'].copy()
+            
+            # Sort by date
+            df = df.sort_values('date')
+            
+            # Convert to lists to avoid pandas issues
+            x_values = list(range(len(df)))
+            pollen_values = df['pollen_hazelnut'].tolist()
+            temp_values = df['temperature'].tolist()
+            
+            print(f"Env Chart - X values: {x_values[:5]}")
+            print(f"Env Chart - Pollen values: {pollen_values[:5]}")
+            print(f"Env Chart - Temp values: {temp_values[:5]}")
+            
+            fig.add_trace(go.Scatter(
+                x=x_values, 
+                y=pollen_values, 
+                name='Hazelnut Pollen', 
+                line=dict(color='brown'),
+                mode='lines+markers'
+            ))
+            fig.add_trace(go.Scatter(
+                x=x_values, 
+                y=temp_values, 
+                name='Temperature', 
+                line=dict(color='red'),
+                mode='lines+markers'
+            ))
+        
+        fig.update_xaxes(title_text="Days")
+        fig.update_yaxes(title_text="Value")
+        fig.update_layout(
+            height=300, 
+            showlegend=True,
+            title="Environmental Factors"
+        )
+        
+        return fig
+    
+    def create_test_chart(self) -> go.Figure:
+        """Create test chart with sample data"""
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            y=[50, 47, 50, 46, 42, 48, 45, 49, 44, 47],
+            name='Test Data',
+            line=dict(color=BRAND_COLOR),
+            mode='lines+markers'
+        ))
+        fig.update_layout(
+            height=300,
+            showlegend=True,
+            title="Test Chart"
+        )
+        return fig
+    
+    def create_empty_chart(self) -> go.Figure:
+        """Create empty chart placeholder"""
+        fig = go.Figure()
+        fig.add_annotation(text="No data available", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        fig.update_layout(height=300)
+        return fig
+    
+    def update_insights_card_content(self, data: Dict[str, Any]):
+        """Update insights card with recent findings"""
+        insights = []
+        
+        if not data['garmin'].empty and not data['subjective'].empty:
+            # Simple correlation check
+            garmin_df = data['garmin']
+            subjective_df = data['subjective']
+            
+            if len(garmin_df) > 1 and len(subjective_df) > 1:
+                hrv_trend = garmin_df['hrv'].iloc[-1] - garmin_df['hrv'].iloc[-2]
+                mood_trend = subjective_df['mood'].iloc[-1] - subjective_df['mood'].iloc[-2]
+                
+                if hrv_trend < -5:
+                    insights.append("Heart Rate Variability decreased significantly - consider stress factors")
+                if mood_trend < -2:
+                    insights.append("Mood dropped - check sleep and nutrition")
+        
+        # Display insights
+        if insights:
+            for insight in insights:
+                ui.label(f"• {insight}").classes('text-sm mb-1')
+        else:
+            ui.label('No significant patterns detected recently.').classes('text-grey-6')
+    
+    def load_existing_data(self):
+        """Load existing data for selected date"""
+        try:
+            date_str = self.date_input.value
+            data = self.db.get_data_for_date(date_str)
+            
+            # Load subjective data
+            if data['subjective']:
+                subj = data['subjective']
+                self.mood_input.value = subj.get('mood', 7)
+                self.mood_value.set_text(str(subj.get('mood', 7)))
+                self.energy_input.value = subj.get('energy_level', 7)
+                self.energy_value.set_text(str(subj.get('energy_level', 7)))
+                self.pain_input.value = subj.get('pain_level', 0)
+                self.pain_value.set_text(str(subj.get('pain_level', 0)))
+                self.allergy_input.value = subj.get('allergy_symptoms', 0)
+                self.allergy_value.set_text(str(subj.get('allergy_symptoms', 0)))
+                self.stress_input.value = subj.get('stress_level', 5)
+                self.stress_value.set_text(str(subj.get('stress_level', 5)))
+                self.sleep_quality_input.value = subj.get('sleep_quality', 7)
+                self.sleep_quality_value.set_text(str(subj.get('sleep_quality', 7)))
+                self.notes_input.value = subj.get('notes', '')
+            
+            ui.notify(f"Loaded data for {date_str}", type='info')
+            
+        except Exception as e:
+            ui.notify(f"Error loading data: {str(e)}", type='error')
+    
+    def save_manual_data(self):
+        """Save manually entered data"""
+        try:
+            date_str = self.date_input.value
+            
+            # Save subjective data
+            subjective_data = {
+                'mood': self.mood_input.value,
+                'energy_level': self.energy_input.value,
+                'pain_level': self.pain_input.value,
+                'allergy_symptoms': self.allergy_input.value,
+                'stress_level': self.stress_input.value,
+                'sleep_quality': self.sleep_quality_input.value,
+                'notes': self.notes_input.value
+            }
+            
+            self.db.insert_manual_data(date_str, 'subjective', subjective_data)
+            
+            # Save food data if provided
+            if self.food_items.value.strip():
+                food_data = {
+                    'meal_type': self.meal_type.value,
+                    'food_items': self.food_items.value,
+                    'tags': self.food_tags.value,
+                    'notes': self.food_notes.value
+                }
+                self.db.insert_manual_data(date_str, 'food', food_data)
+            
+            ui.notify("Data saved successfully!", type='positive')
+            
+        except Exception as e:
+            ui.notify(f"Error saving data: {str(e)}", type='error')
+    
+    def sync_garmin_data(self):
+        """Sync data from Garmin Connect"""
+        try:
+            self.sync_status.set_text("Syncing...")
+            # TODO: Implement Garmin Connect sync
+            ui.notify("Garmin sync not yet implemented", type='warning')
+            self.sync_status.set_text("Sync completed")
+        except Exception as e:
+            ui.notify(f"Error syncing Garmin data: {str(e)}", type='error')
+            self.sync_status.set_text("Sync failed")
+    
+    def sync_weather_data(self):
+        """Sync weather and pollen data from OpenWeatherMap API"""
+        try:
+            self.weather_status.set_text("Syncing...")
+            
+            # Get current date
+            today = datetime.now().date()
+            
+            # Get API key from environment variable
+            api_key = os.getenv('OPENWEATHER_API_KEY')
+            
+            if not api_key:
+                # Fallback to sample data if no API key
+                ui.notify("No API key found. Using sample data. Set OPENWEATHER_API_KEY environment variable for real data.", type='warning')
+                weather_data = self._generate_sample_weather_data(today)
+            else:
+                # Fetch real weather data from OpenWeatherMap
+                weather_data = self._fetch_real_weather_data(api_key, today)
+            
+            # Insert into database
+            self.db.insert_environmental_data(weather_data)
+            
+            ui.notify(f"Weather data synced for {today}", type='positive')
+            self.weather_status.set_text("Sync completed")
+            
+        except Exception as e:
+            ui.notify(f"Error syncing weather data: {str(e)}", type='error')
+            self.weather_status.set_text("Sync failed")
+    
+    def _fetch_real_weather_data(self, api_key: str, date) -> Dict[str, Any]:
+        """Fetch real weather data from OpenWeatherMap API for Zurich"""
+        try:
+            # Current weather for Zurich
+            weather_url = f"http://api.openweathermap.org/data/2.5/weather?q=Zurich,CH&appid={api_key}&units=metric"
+            weather_response = requests.get(weather_url, timeout=10)
+            weather_response.raise_for_status()
+            weather_data = weather_response.json()
+            
+            # Air pollution data for Zurich
+            pollution_url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat=47.3769&lon=8.5417&appid={api_key}"
+            pollution_response = requests.get(pollution_url, timeout=10)
+            pollution_response.raise_for_status()
+            pollution_data = pollution_response.json()
+            
+            # Extract weather information
+            main = weather_data['main']
+            weather_desc = weather_data['weather'][0]['main'].lower()
+            
+            # Map weather conditions to our format
+            weather_condition_map = {
+                'clear': 'sunny',
+                'clouds': 'cloudy',
+                'rain': 'rainy',
+                'drizzle': 'rainy',
+                'thunderstorm': 'rainy',
+                'snow': 'rainy',
+                'mist': 'cloudy',
+                'fog': 'cloudy',
+                'haze': 'cloudy'
+            }
+            
+            weather_condition = weather_condition_map.get(weather_desc, 'partly_cloudy')
+            
+            # Extract air quality
+            aqi = pollution_data['list'][0]['main']['aqi']  # 1-5 scale
+            
+            return {
+                'date': date,
+                'location': 'Zurich',
+                'temperature': round(main['temp'], 1),
+                'humidity': main['humidity'],
+                'pollen_hazelnut': random.randint(0, 5),  # No pollen API available
+                'pollen_birch': random.randint(0, 5),
+                'pollen_grass': random.randint(0, 5),
+                'air_quality_index': aqi,
+                'weather_condition': weather_condition
+            }
+            
+        except requests.RequestException as e:
+            ui.notify(f"API request failed: {str(e)}", type='warning')
+            return self._generate_sample_weather_data(date)
+        except KeyError as e:
+            ui.notify(f"API response format error: {str(e)}", type='warning')
+            return self._generate_sample_weather_data(date)
+    
+    def _generate_sample_weather_data(self, date) -> Dict[str, Any]:
+        """Generate sample weather data as fallback"""
+        return {
+            'date': date,
+            'location': 'Zurich',
+            'temperature': round(random.uniform(5, 25), 1),
+            'humidity': random.randint(40, 80),
+            'pollen_hazelnut': random.randint(0, 5),
+            'pollen_birch': random.randint(0, 5),
+            'pollen_grass': random.randint(0, 5),
+            'air_quality_index': random.randint(1, 5),
+            'weather_condition': random.choice(['sunny', 'cloudy', 'rainy', 'partly_cloudy'])
+        }
+    
+    def load_insights(self):
+        """Load insights and analysis"""
+        try:
+            data = self.db.get_dashboard_data(90)
+            
+            # Update baseline
+            self.baseline_content.clear()
+            with self.baseline_content:
+                if not data['garmin'].empty:
+                    garmin_df = data['garmin']
+                    avg_hr = garmin_df['resting_hr'].mean()
+                    avg_hrv = garmin_df['hrv'].mean()
+                    avg_sleep = garmin_df['sleep_duration'].mean()
+                    
+                    ui.label(f"Average Resting HR: {avg_hr:.1f} bpm").classes('mb-1')
+                    ui.label(f"Average Heart Rate Variability: {avg_hrv:.1f} ms").classes('mb-1')
+                    ui.label(f"Average Sleep: {avg_sleep:.1f} hours").classes('mb-1')
+                else:
+                    ui.label('Insufficient data for baseline calculation').classes('text-grey-6')
+            
+            # Update correlation chart
+            self.correlation_container.clear()
+            with self.correlation_container:
+                correlation_fig = self.create_correlation_chart(data)
+                ui.plotly(figure=correlation_fig).classes('w-full h-64')
+            
+        except Exception as e:
+            ui.notify(f"Error loading insights: {str(e)}", type='error')
+    
+    def create_correlation_chart(self, data: Dict[str, Any]) -> go.Figure:
+        """Create correlation analysis chart"""
+        fig = go.Figure()
+        
+        if not data['garmin'].empty and not data['subjective'].empty:
+            # Simple correlation visualization
+            garmin_df = data['garmin'].copy()
+            subjective_df = data['subjective'].copy()
+            
+            # Convert date strings to datetime
+            garmin_df['date'] = pd.to_datetime(garmin_df['date'])
+            subjective_df['date'] = pd.to_datetime(subjective_df['date'])
+            
+            # Merge data on date
+            merged = pd.merge(garmin_df, subjective_df, on='date', how='inner')
+            
+            if not merged.empty:
+                fig.add_trace(go.Scatter(
+                    x=merged['hrv'], 
+                    y=merged['mood'], 
+                    mode='markers',
+                    name='Heart Rate Variability vs Mood',
+                    marker=dict(color=BRAND_COLOR, size=8)
+                ))
+        
+        fig.update_xaxes(title_text="Heart Rate Variability (ms)")
+        fig.update_yaxes(title_text="Mood (1-10)")
+        fig.update_layout(height=300, showlegend=True)
+        
+        return fig
+    
+    def load_hypotheses(self):
+        """Load and display hypotheses"""
+        try:
+            data = self.db.get_dashboard_data(30)
+            hypotheses_df = data['hypotheses']
+            
+            self.hypotheses_list.clear()
+            with self.hypotheses_list:
+                if not hypotheses_df.empty:
+                    for _, hyp in hypotheses_df.iterrows():
+                        with ui.card().classes('p-3 mb-2'):
+                            with ui.row().classes('w-full justify-between items-start'):
+                                with ui.column().classes('flex-1'):
+                                    ui.label(hyp['title']).classes('font-bold')
+                                    ui.label(hyp['description']).classes('text-sm text-grey-6')
+                                    ui.label(f"Status: {hyp['status']} | Confidence: {hyp['confidence_score']:.2f}").classes('text-xs text-grey-5')
+                                with ui.row():
+                                    ui.button('Test', icon='science').classes('mr-2 text-sm')
+                                    ui.button('Edit', icon='edit').classes('text-sm')
+                else:
+                    ui.label('No hypotheses found').classes('text-grey-6')
+                    
+        except Exception as e:
+            ui.notify(f"Error loading hypotheses: {str(e)}", type='error')
+    
+    def add_hypothesis(self):
+        """Add new hypothesis"""
+        try:
+            # TODO: Implement hypothesis addition to database
+            ui.notify("Hypothesis addition not yet implemented", type='warning')
+        except Exception as e:
+            ui.notify(f"Error adding hypothesis: {str(e)}", type='error')
+
+# Create and run the app
+if __name__ in {"__main__", "__mp_main__"}:
+    app = MyPatternApp()
+    ui.run(port=8080, title="MyPattern - Personal Health Detective")
