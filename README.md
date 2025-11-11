@@ -6,9 +6,10 @@ MyPattern ist eine persönliche Gesundheits-App, die dabei hilft, individuelle M
 
 - **Dashboard**: Übersicht über alle wichtigen Gesundheitsmetriken
 - **Manuelle Eingabe**: Subjektive Werte wie Stimmung, Energie, Schmerzen eingeben
-- **Device Sync**: Synchronisation mit Garmin Connect (geplant)
+- **Device Sync**: Synchronisation mit Garmin Connect
 - **Insights**: Personal-Baseline und Anomalie-Erkennung
 - **Hypothesen**: Verwaltung von Gesundheits-Hypothesen und Mini-Experimenten
+- Wetter-API Integration
 
 ## Installation
 
@@ -71,8 +72,6 @@ Die App verwendet die Farbe `#2ECC71` (Grün) als Markenfarbe.
 
 ## Nächste Schritte
 
-- Garmin Connect Integration implementieren
-- Wetter-API Integration
 - Erweiterte Korrelationsanalyse
 - A/B-Test-Framework für Hypothesen
 - Export-Funktionen für Daten
